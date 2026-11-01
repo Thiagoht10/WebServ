@@ -1,0 +1,6 @@
+# Local editor settings
+/.vscode/
+
+# Build artifacts
+/webserv
+*.o
