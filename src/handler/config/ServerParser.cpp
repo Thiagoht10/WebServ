@@ -3,8 +3,23 @@
 #include <stdexcept>
 #include <cctype>
 
+
 namespace webserv
 {
+    ServerParser::ServerParser()
+        : numMaxBodyDefined(0)
+    {}
+
+    ServerParser::~ServerParser(){}
+
+    void    ServerParser::throwExpect(const Token& token, const std::string& msg)
+    {
+        std::ostringstream error;
+
+        error << "line " << token.line << ": " << msg;
+        throw std::runtime_error(error.str());
+    }
+
     ServerConfig    ServerParser::parse(TokenStream& input)
     {
         ServerConfig    server;
@@ -25,12 +40,7 @@ namespace webserv
                 errorPage(input, server);
 
             else
-            {
-                std::ostringstream error;
-                error << "line " << input.peek().line
-                    << ": invalid wordkey " << input.peek().value;
-                throw std::runtime_error(error.str());
-            }
+                throwExpect(input.peek(), "invalid wordkey " + input.peek().value);
         }
 
         return server;
@@ -49,68 +59,95 @@ namespace webserv
 
         size_t pos = token.value.find(':');
         if (pos == std::string::npos)
-            throw std::runtime_error("listen: lack ':'");
+            throwExpect(token, "expected ':'");
 
         ip = token.value.substr(0, pos);
         port = token.value.substr(pos + 1);
 
         if (ip.size() == 0 || port.size() == 0)
-        {
-            std::ostringstream error;
-            error << "line " << token.line
-                << ": expected host:port";
-            throw std::runtime_error(error.str());
-        }
+            throwExpect(token, "expected host:port");
 
         std::istringstream stream(ip);
         while (std::getline(stream, part, '.'))
         {
-            int num;
+            int octetValue;
             std::stringstream ss(part);
 
             for (size_t i = 0; i < part.size(); ++i)
             {
                 if (!std::isdigit(static_cast<unsigned char>(part[i])))
-                    throw std::runtime_error("listen: invalid host");
+                    throwExpect(token, "listen: invalid host");
             }
 
-            ss >> num;
+            ss >> octetValue;
             if (ss.fail())
-                throw std::runtime_error("listen: failure to read ip");
+                throwExpect(token, "listen: failure to read ip");
 
-            if (num < 0 || num > 255)
-                throw std::runtime_error("listen: host with an incorrect range");
+            if (octetValue < 0 || octetValue > 255)
+                throwExpect(token, "listen: host with an incorrect range");
 
             octets++;
         }
 
         if (ip[ip.size() - 1] == '.')
-            throw std::runtime_error("listen: host cannot end with '.'");
+            throwExpect(token, "listen: host cannot end with '.'");
         if (octets != 4)
-            throw std::runtime_error("listen: expected four octets");
+            throwExpect(token, "listen: expected four octets");
 
         
         std::stringstream ss(port);
-        int numPort;
+        int portNumber;
 
         for (size_t i = 0; i < port.size(); ++i)
         {
             if (!std::isdigit(static_cast<unsigned char>(port[i])))
-                throw std::runtime_error("listen: invalid port");
+                throwExpect(token, "listen: invalid port");
         }
 
-        ss >> numPort;
+        ss >> portNumber;
         if (ss.fail())
-            throw std::runtime_error("listen: failure to read port");
+            throwExpect(token, "listen: failure to read port");
 
-        if (numPort < 1 || numPort > 65535)
-            throw std::runtime_error("listen: port with an incorrect range");
+        if (portNumber < 1 || portNumber > 65535)
+            throwExpect(token, "listen: port with an incorrect range");
            
         input.expect(";");
 
         ListenAddress listen;
         listen.host = ip;
-        listen.port = static_cast<unsigned short>(numPort);
+        listen.port = static_cast<unsigned short>(portNumber);
         server.listeners.push_back(listen);
+    }
+
+    void    ServerParser::maxBody(TokenStream& input, ServerConfig& server)
+    {
+        Token token;
+
+        input.expect("client_max_body_size");
+        if (numMaxBodyDefined != 0)
+            throwExpect(input.peek(), "client_max_body_size alread defined");
+
+        token = input.consume();
+
+        if (token.value == ";")
+            throwExpect(token, "max_body: is empty");
+
+        for (size_t i = 0; i < token.value.size(); i++)
+        {
+            if (!std::isdigit(static_cast<unsigned char>(token.value[i])))
+                throwExpect(token, "expected only numbers");
+        }
+
+        size_t  convertMaxBody;
+        std::stringstream stream(token.value);
+
+        stream >> convertMaxBody;
+        if (stream.fail())
+            throwExpect(token, "failure to read value");
+
+        input.expect(";");
+
+        server.maxBodyBytes = convertMaxBody;
+        numMaxBodyDefined++;
     }
 }
