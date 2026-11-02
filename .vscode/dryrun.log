@@ -1,0 +1,9 @@
+make --dry-run --always-make --keep-going --print-directory
+make: Entering directory '/home/thiago/github/WebServ'
+c++ -Wall -Werror -Wextra -Iincludes -Iincludes/network -Iincludes/handler -Iincludes/handler/config -Iincludes/http -c main.cpp -o main.o
+c++ -Wall -Werror -Wextra -Iincludes -Iincludes/network -Iincludes/handler -Iincludes/handler/config -Iincludes/http -c src/handler/config/ConfigLexer.cpp -o src/handler/config/ConfigLexer.o
+c++ -Wall -Werror -Wextra -Iincludes -Iincludes/network -Iincludes/handler -Iincludes/handler/config -Iincludes/http -c src/handler/ServerConfig.cpp -o src/handler/ServerConfig.o
+c++ -Wall -Werror -Wextra -Iincludes -Iincludes/network -Iincludes/handler -Iincludes/handler/config -Iincludes/http -c src/handler/config/TokenStream.cpp -o src/handler/config/TokenStream.o
+c++ -Wall -Werror -Wextra main.o src/handler/config/ConfigLexer.o src/handler/ServerConfig.o src/handler/config/TokenStream.o -o webserv
+make: Leaving directory '/home/thiago/github/WebServ'
+ 
