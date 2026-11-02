@@ -7,7 +7,7 @@
 namespace webserv
 {
     ServerParser::ServerParser()
-        : numMaxBodyDefined(0)
+        : _numMaxBodyDefined(0)
     {}
 
     ServerParser::~ServerParser(){}
@@ -18,6 +18,19 @@ namespace webserv
 
         error << "line " << token.line << ": " << msg;
         throw std::runtime_error(error.str());
+    }
+
+    bool    ServerParser::onlyDigit(const std::string& value) const
+    {
+        if (value.empty())
+            return false;
+
+        for (size_t i = 0; i < value.size(); ++i)
+        {
+            if (!std::isdigit(static_cast<unsigned char>(value[i])))
+                return false;
+        }
+        return true;
     }
 
     ServerConfig    ServerParser::parse(TokenStream& input)
@@ -73,11 +86,8 @@ namespace webserv
             int octetValue;
             std::stringstream ss(part);
 
-            for (size_t i = 0; i < part.size(); ++i)
-            {
-                if (!std::isdigit(static_cast<unsigned char>(part[i])))
-                    throwExpect(token, "listen: invalid host");
-            }
+            if (!onlyDigit(part))
+                throwExpect(token, "listen: invalid host");
 
             ss >> octetValue;
             if (ss.fail())
@@ -98,11 +108,8 @@ namespace webserv
         std::stringstream ss(port);
         int portNumber;
 
-        for (size_t i = 0; i < port.size(); ++i)
-        {
-            if (!std::isdigit(static_cast<unsigned char>(port[i])))
-                throwExpect(token, "listen: invalid port");
-        }
+        if (!onlyDigit(port))
+            throwExpect(token, "listen: invalid port");
 
         ss >> portNumber;
         if (ss.fail())
@@ -124,7 +131,7 @@ namespace webserv
         Token token;
 
         input.expect("client_max_body_size");
-        if (numMaxBodyDefined != 0)
+        if (_numMaxBodyDefined != 0)
             throwExpect(input.peek(), "client_max_body_size alread defined");
 
         token = input.consume();
@@ -132,11 +139,8 @@ namespace webserv
         if (token.value == ";")
             throwExpect(token, "max_body: is empty");
 
-        for (size_t i = 0; i < token.value.size(); i++)
-        {
-            if (!std::isdigit(static_cast<unsigned char>(token.value[i])))
-                throwExpect(token, "expected only numbers");
-        }
+        if (!onlyDigit(token.value))
+            throwExpect(token, "expected only numbers");
 
         size_t  convertMaxBody;
         std::stringstream stream(token.value);
@@ -148,6 +152,43 @@ namespace webserv
         input.expect(";");
 
         server.maxBodyBytes = convertMaxBody;
-        numMaxBodyDefined++;
+        _numMaxBodyDefined++;
+    }
+
+    void    ServerParser::errorPage(TokenStream& input, ServerConfig& server)
+    {
+        Token   tokenCode;
+        Token   tokenPath;
+
+        input.expect("error_page");
+        tokenCode = input.consume();
+
+        if (!onlyDigit(tokenCode.value))
+            throwExpect(tokenCode, "expected only numbers");
+
+        int convertErrorPage;
+        std::stringstream stream(tokenCode.value);
+
+        stream >> convertErrorPage;
+        if (stream.fail())
+            throwExpect(tokenCode, "failure to read value");
+
+        if (server.errorPages.find(convertErrorPage) != server.errorPages.end())
+            throwExpect(tokenCode, "error_page: code alread defined");
+
+        if (convertErrorPage < 400 || convertErrorPage > 599)
+            throwExpect(tokenCode, "error_page: expected code between 400 and 599");
+
+        tokenPath = input.consume();
+
+        if (tokenPath.value.empty()
+            || tokenPath.value == ";"
+            || tokenPath.value == "{"
+            || tokenPath.value == "}")
+            throwExpect(tokenPath, "error_page: expected a path");
+
+        input.expect(";");
+
+        server.errorPages[convertErrorPage] = tokenPath.value;
     }
 }
