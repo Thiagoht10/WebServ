@@ -13,9 +13,8 @@ namespace webserv
     class ServerParser
     {
     private:
-        size_t  _numMaxBodyDefined; 
+        bool    _numMaxBodyDefined;
 
-        void    throwExpect(const Token& token, const std::string& msg);
         bool    onlyDigit(const std::string& value) const;
 
         void    parseListen(TokenStream& input, ServerConfig& server);

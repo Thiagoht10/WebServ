@@ -11,9 +11,9 @@ namespace webserv
     struct ListenAddress
     {
         std::string    host;
-        unsigned short port;
+        std::string    port;
 
-        ListenAddress() : port(0) {}
+        ListenAddress() : port("0") {}
     };
 
     struct RouteConfig

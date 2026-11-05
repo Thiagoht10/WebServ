@@ -7,7 +7,9 @@ INCLUDE = $(addprefix -I,$(shell find includes -type d))
 NAME = webserv
 
 SRC = main.cpp src/handler/config/ConfigLexer.cpp src/handler/ServerConfig.cpp \
-src/handler/config/TokenStream.cpp
+src/handler/config/TokenStream.cpp src/handler/ConfigError.cpp \
+src/handler/config/ConfigParser.cpp src/handler/config/ServerParser.cpp \
+src/handler/config/RouteParser.cpp
 
 OBJ = $(SRC:.cpp=.o)
 

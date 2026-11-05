@@ -8,7 +8,6 @@ namespace webserv
     std::vector<ServerConfig>   ConfigParser::parse(TokenStream& input)
     {
         std::vector<ServerConfig>   servers;
-        ServerParser                parser;
 
         while(!input.atEnd())
         {
@@ -20,10 +19,11 @@ namespace webserv
                 throw std::runtime_error(error.str());
             }
 
+            ServerParser                parser;
             ServerConfig server = parser.parse(input);
             servers.push_back(server);
         }
 
-        return servers;        
+        return servers;
     }
 }

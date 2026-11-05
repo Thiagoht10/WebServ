@@ -1,4 +1,6 @@
 #include "ServerParser.hpp"
+#include "RouteParser.hpp"
+#include "handler/ConfigError.hpp"
 #include <sstream>
 #include <stdexcept>
 #include <cctype>
@@ -7,18 +9,10 @@
 namespace webserv
 {
     ServerParser::ServerParser()
-        : _numMaxBodyDefined(0)
+        : _numMaxBodyDefined(false)
     {}
 
     ServerParser::~ServerParser(){}
-
-    void    ServerParser::throwExpect(const Token& token, const std::string& msg)
-    {
-        std::ostringstream error;
-
-        error << "line " << token.line << ": " << msg;
-        throw std::runtime_error(error.str());
-    }
 
     bool    ServerParser::onlyDigit(const std::string& value) const
     {
@@ -36,6 +30,7 @@ namespace webserv
     ServerConfig    ServerParser::parse(TokenStream& input)
     {
         ServerConfig    server;
+        RouteParser     route;
         Token           token;
 
         token = input.consume();
@@ -52,9 +47,14 @@ namespace webserv
             else if (input.peek().value == "error_page")
                 errorPage(input, server);
 
+            else if (input.peek().value == "location")
+                server.routes.push_back(route.parse(input));
+
             else
                 throwExpect(input.peek(), "invalid wordkey " + input.peek().value);
         }
+
+        input.expect("}");
 
         return server;
     }
@@ -122,7 +122,7 @@ namespace webserv
 
         ListenAddress listen;
         listen.host = ip;
-        listen.port = static_cast<unsigned short>(portNumber);
+        listen.port = port;
         server.listeners.push_back(listen);
     }
 
@@ -131,7 +131,7 @@ namespace webserv
         Token token;
 
         input.expect("client_max_body_size");
-        if (_numMaxBodyDefined != 0)
+        if (_numMaxBodyDefined)
             throwExpect(input.peek(), "client_max_body_size alread defined");
 
         token = input.consume();
@@ -152,7 +152,7 @@ namespace webserv
         input.expect(";");
 
         server.maxBodyBytes = convertMaxBody;
-        _numMaxBodyDefined++;
+        _numMaxBodyDefined = true;
     }
 
     void    ServerParser::errorPage(TokenStream& input, ServerConfig& server)

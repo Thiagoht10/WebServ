@@ -4,6 +4,8 @@
 
 int main(int argc, char *argv[])
 {
+    std::vector<webserv::ServerConfig> servers;
+
     if (argc > 2)
     {
         std::cerr << "Usage: " << argv[0] << " [config_file]\n";
@@ -13,7 +15,7 @@ int main(int argc, char *argv[])
     try
     {
         webserv::ConfigLoader loader;
-        loader.load(argc == 2 ? argv[1] : "config/default.conf");
+        servers = loader.load(argc == 2 ? argv[1] : "config/default.conf");
     }
     catch (const std::exception& e)
     {

@@ -1,6 +1,7 @@
 #include "ServerConfig.hpp"
 #include "ConfigLexer.hpp"
 #include "TokenStream.hpp"
+#include "ConfigParser.hpp"
 #include <stdexcept>
 #include <sstream>
 #include <fstream>
@@ -46,6 +47,8 @@ namespace webserv
         //printTokens(tokens);
         // Temporario: o parser ainda nao produz ServerConfig.
 
-        return std::vector<ServerConfig>();
+        ConfigParser parser;
+
+        return parser.parse(input);
     }
 }
