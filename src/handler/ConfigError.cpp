@@ -1,4 +1,4 @@
-#include "handler/ConfigError.hpp"
+#include "ConfigError.hpp"
 #include <sstream>
 #include <stdexcept>
 

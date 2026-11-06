@@ -54,8 +54,10 @@ namespace webserv
                 throwExpect(input.peek(), "invalid wordkey " + input.peek().value);
         }
 
-        if (route.uploadEnabled && route.uploadDirectory.empty())
-            throwExpect(input.peek(), "it's need define 'upload_directory'");
+        verifyAllowedMethods(route);
+        verifyUpload(input, route);
+        verifyRoot(input, route);
+        verifyCombination(input, route);
 
         input.expect("}");
         return route;
@@ -299,5 +301,58 @@ namespace webserv
 
         route.redirectStatus = code;
         route.redirectTarget = tokenValue.value;
+    }
+
+    void    RouteParser::verifyUpload(TokenStream& input, const RouteConfig& route)
+    {
+        if (route.uploadEnabled && route.uploadDirectory.empty())
+            throwExpect(input.peek(), "it's need define 'upload_directory'");
+
+        if (route.uploadEnabled)
+        {
+            for (size_t i = 0; i < route.allowedMethods.size(); i++)
+            {
+                if (route.allowedMethods[i] == "POST")
+                    return;
+            }
+            throwExpect(input.peek(),
+                "upload_enabled: requires POST in allowed_methods");
+        }
+    }
+
+    void    RouteParser::verifyRoot(TokenStream& input, const RouteConfig& route)
+    {
+        if (route.root.empty())
+        {
+            if (route.redirectStatus == 0 || !route.indexFile.empty()
+                    || route.uploadEnabled
+                    || route.directoryListing 
+                    || !route.cgiInterpreters.empty())
+            {
+                throwExpect(input.peek(), 
+                    "root: required for file operations or CGI");
+            }
+        }
+    }
+
+    void    RouteParser::verifyAllowedMethods(RouteConfig& route)
+    {
+        if (route.allowedMethods.empty())
+            route.allowedMethods.push_back("GET");
+    }
+
+    void    RouteParser::verifyCombination(TokenStream& input, const RouteConfig& route)
+    {
+        if (route.redirectStatus != 0)
+        {
+            if (!route.indexFile.empty() || route.uploadEnabled
+                    || route.directoryListing
+                    || !route.cgiInterpreters.empty())
+            {
+                throwExpect(input.peek(),
+                    "return: cannot be combined with index, upload_enabled on, "
+                    "directory_listing on or cgi_interpreter");
+            }
+        }
     }
 }

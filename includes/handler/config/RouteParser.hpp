@@ -21,6 +21,11 @@ namespace webserv
         void    uploadDirectory(TokenStream& input, RouteConfig& route);
         void    cgiInterpreter(TokenStream& input, RouteConfig& route);
         void    returnParser(TokenStream& input, RouteConfig& route);
+
+        void    verifyUpload(TokenStream& input, const RouteConfig& route);
+        void    verifyRoot(TokenStream& input, const RouteConfig& route);
+        void    verifyAllowedMethods(RouteConfig& route);
+        void    verifyCombination(TokenStream& input, const RouteConfig& route);
         
     public:
         RouteParser();
