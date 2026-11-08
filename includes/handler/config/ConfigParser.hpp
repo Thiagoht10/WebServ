@@ -12,6 +12,8 @@ namespace webserv
     {
     public:
         std::vector<ServerConfig> parse(TokenStream& input);
+
+        void    verifyServerListeners(const std::vector<ServerConfig>& servers);
     };
     
 }

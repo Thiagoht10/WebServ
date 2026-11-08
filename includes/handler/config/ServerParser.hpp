@@ -13,13 +13,16 @@ namespace webserv
     class ServerParser
     {
     private:
-        bool    _numMaxBodyDefined;
+        bool    _maxBodyDefined;
 
         bool    onlyDigit(const std::string& value) const;
 
         void    parseListen(TokenStream& input, ServerConfig& server);
         void    maxBody(TokenStream& input, ServerConfig& server);
         void    errorPage(TokenStream& input, ServerConfig& server);
+
+        void    verifyListeners(const TokenStream& input, const ServerConfig& server);
+        void    verifyRoutes(const TokenStream& input, const ServerConfig& Server);
 
     public:
         ServerParser();

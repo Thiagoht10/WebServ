@@ -47,7 +47,8 @@ namespace webserv
         if (value != _tokens[_position].value)
         {
             error << "line " << _tokens[_position].line << ": ";
-            error << "expected \"" << value << "\"";
+            error << "expected \"" << value << "\", found \""
+                  << _tokens[_position].value << "\"";
 
             throw std::runtime_error(error.str());
         }

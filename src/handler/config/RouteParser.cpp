@@ -1,5 +1,5 @@
 #include "RouteParser.hpp"
-#include "handler/ConfigError.hpp"
+#include "ConfigAux.hpp"
 #include <cctype>
 #include <sstream>
 
@@ -51,7 +51,7 @@ namespace webserv
                 returnParser(input, route);
 
             else
-                throwExpect(input.peek(), "invalid wordkey " + input.peek().value);
+                throwExpect(input.peek(), "unknown directive '" + input.peek().value + "' in location block");
         }
 
         verifyAllowedMethods(route);
@@ -70,10 +70,10 @@ namespace webserv
         token = input.consume();
 
         if (token.value == "{" || token.value == "}" || token.value == ";")
-            throwExpect(token, "expected path");
+            throwExpect(token, "location: expected a path starting with '/'");
 
         if (token.value[0] != '/')
-            throwExpect(token, "bad path: expected /");
+            throwExpect(token, "location: path must start with '/'");
         
         route.path = token.value;
     }
@@ -89,10 +89,10 @@ namespace webserv
             || token.value == ";"
             || token.value == "{"
             || token.value == "}")
-            throwExpect(token, "error_page: expected a path");
+            throwExpect(token, "root: expected a directory path");
 
         if (!route.root.empty())
-            throwExpect(token, "root alread defined");
+            throwExpect(token, "root: directive already defined in this location block");
 
         input.expect(";");
         route.root = token.value;
@@ -106,10 +106,10 @@ namespace webserv
         input.expect("allowed_methods");
 
         if (!route.allowedMethods.empty())
-            throwExpect(input.peek(), "parameter alread defined");
+            throwExpect(input.peek(), "allowed_methods: directive already defined in this location block");
 
         if (input.peek().value == ";")
-            throwExpect(input.peek(), "expected: GET, POST, or DELETE");
+            throwExpect(input.peek(), "allowed_methods: expected one or more methods (GET, POST, DELETE)");
         
         while(input.peek().value != ";")
         {
@@ -121,12 +121,12 @@ namespace webserv
                 for (size_t i = 0; i < tmp.size(); i++)
                 {
                     if (token.value == tmp[i])
-                        throwExpect(token, "repeated argument");
+                        throwExpect(token, "allowed_methods: duplicate method");
                 }
                 tmp.push_back(token.value);
             }
             else
-                throwExpect(token, "expected: GET, POST, or DELETE");
+                throwExpect(token, "allowed_methods: expected one or more methods (GET, POST, DELETE)");
         }
 
         input.expect(";");
@@ -142,15 +142,15 @@ namespace webserv
         input.expect("directory_listing");
         
         if (_directListeningDefined)
-            throwExpect(input.peek(), "parameter alread defined");
+            throwExpect(input.peek(), "directory_listing: directive already defined in this location block");
 
         token = input.consume();
         
         if (token.value == ";")
-            throwExpect(token, "expected: 'on' or 'off' as argument");
+            throwExpect(token, "directory_listing: expected 'on' or 'off'");
 
         if (token.value != "on" && token.value != "off")
-            throwExpect(token, "expected: 'on' or 'off' as argument");
+            throwExpect(token, "directory_listing: expected 'on' or 'off'");
 
         input.expect(";");
         
@@ -168,12 +168,12 @@ namespace webserv
         input.expect("index");
 
         if (!route.indexFile.empty())
-            throwExpect(input.peek(), "parameter alread defined");
+            throwExpect(input.peek(), "index: directive already defined in this location block");
 
         token = input.consume();
 
         if (token.value == ";" || token.value == "{" || token.value == "}")
-            throwExpect(token, "expected: an index file path");
+            throwExpect(token, "index: expected an index file path");
 
         input.expect(";");
 
@@ -188,15 +188,15 @@ namespace webserv
         input.expect("upload_enabled");
 
         if (_uploadEnableDefined)
-            throwExpect(input.peek(), "parameter alread defined");
+            throwExpect(input.peek(), "upload_enabled: directive already defined in this location block");
 
         token = input.consume();
         
         if (token.value == ";")
-            throwExpect(token, "expected: a argument");
+            throwExpect(token, "upload_enabled: expected 'on' or 'off'");
 
         if (token.value != "on" && token.value != "off")
-            throwExpect(token, "expected: 'on' or 'off' as argument");
+            throwExpect(token, "upload_enabled: expected 'on' or 'off'");
 
         input.expect(";");
 
@@ -214,12 +214,12 @@ namespace webserv
         input.expect("upload_directory");
 
         if (!route.uploadDirectory.empty())
-            throwExpect(input.peek(), "parameter alread defined");
+            throwExpect(input.peek(), "upload_directory: directive already defined in this location block");
 
         token = input.consume();
 
         if (token.value == ";" || token.value == "{" || token.value == "}")
-            throwExpect(token, "expected: a path to directory");
+            throwExpect(token, "upload_directory: expected a directory path");
 
         input.expect(";");
 
@@ -236,7 +236,7 @@ namespace webserv
         tokenKey = input.consume();
 
         if (tokenKey.value == ";")
-            throwExpect(tokenKey, "expected: um extension file and path");
+            throwExpect(tokenKey, "cgi_interpreter: expected a file extension and an interpreter path");
 
         if (tokenKey.value.size() < 2 || tokenKey.value[0] != '.')
             throwExpect(tokenKey, "cgi_interpreter: expected a file extension starting with '.' (e.g. '.py')");
@@ -245,13 +245,13 @@ namespace webserv
 
         if (tokenValue.value == ";" || tokenValue.value == "{"
                 || tokenValue.value == "}")
-            throwExpect(tokenValue, "expected: um extension file and path");
+            throwExpect(tokenValue, "cgi_interpreter: expected a file extension and an interpreter path");
 
         input.expect(";");
 
         if (route.cgiInterpreters.find(tokenKey.value)
                 != route.cgiInterpreters.end())
-            throwExpect(tokenKey, "cgi_interpreter: extension already defined");
+            throwExpect(tokenKey, "cgi_interpreter: file extension already defined in this location block");
         
         route.cgiInterpreters[tokenKey.value] = tokenValue.value;
     }
@@ -264,17 +264,17 @@ namespace webserv
         input.expect("return");
 
         if (route.redirectStatus != 0)
-            throwExpect(input.peek(), "return: already defined");
+            throwExpect(input.peek(), "return: directive already defined in this location block");
 
         tokenCode = input.consume();
 
         if (tokenCode.value == ";")
-            throwExpect(tokenCode, "expected: a redirect status and a path");
+            throwExpect(tokenCode, "return: expected a redirect status code and a target path");
 
         for (size_t i = 0; i < tokenCode.value.size(); i++)
         {
             if (!std::isdigit(static_cast<unsigned char>(tokenCode.value[i])))
-                throwExpect(tokenCode, "expected: only digits on redirect status");
+                throwExpect(tokenCode, "return: status code must contain only decimal digits");
         }
 
         int code;
@@ -282,20 +282,20 @@ namespace webserv
 
         stream >> code;
         if (stream.fail())
-            throwExpect(tokenCode, "failure to read digits");
+            throwExpect(tokenCode, "return: status code exceeds the supported integer range");
 
         if (code != 301 && code != 302 && code != 303
                 && code != 307 && code != 308)
-            throwExpect(tokenCode, "return: expected 301, 302, 303, 307 or 308");
+            throwExpect(tokenCode, "return: expected status code 301, 302, 303, 307 or 308");
 
         tokenValue = input.consume();
 
         if (tokenValue.value == ";" || tokenValue.value == "{"
                 || tokenValue.value == "}")
-            throwExpect(tokenValue, "expected: a redirect status and a path");
+            throwExpect(tokenValue, "return: expected a redirect status code and a target path");
 
         if (tokenValue.value[0] != '/')
-            throwExpect(tokenValue, "bad path: expected /");
+            throwExpect(tokenValue, "return: target path must start with '/'");
 
         input.expect(";");
 
@@ -306,7 +306,7 @@ namespace webserv
     void    RouteParser::verifyUpload(TokenStream& input, const RouteConfig& route)
     {
         if (route.uploadEnabled && route.uploadDirectory.empty())
-            throwExpect(input.peek(), "it's need define 'upload_directory'");
+            throwExpect(input.peek(), "upload_enabled: 'on' requires an upload_directory directive");
 
         if (route.uploadEnabled)
         {

@@ -6,6 +6,7 @@
 #include <sstream>
 #include <fstream>
 #include <iostream>
+#include <sys/stat.h>
 
 namespace
 {
@@ -19,16 +20,24 @@ namespace
 
     std::string readFile(const std::string& path)
     {
+        struct stat info;
+
+        if (stat(path.c_str(), &info) == -1)
+            throw std::runtime_error("unable to inspect configuration file '" + path + "'");
+
+        if (!S_ISREG(info.st_mode))
+            throw std::runtime_error("configuration path is not a regular file: '" + path + "'");
+        
         std::ifstream file(path.c_str());
 
         if (!file.is_open())
-            throw std::runtime_error("cannot open config file");
+            throw std::runtime_error("unable to open configuration file '" + path + "'");
 
         std::ostringstream buffer;
         buffer << file.rdbuf();
 
         if (buffer.bad())
-            throw std::runtime_error("error reading config file");
+            throw std::runtime_error("unable to read configuration file '" + path + "'");
 
         return buffer.str();
     }
