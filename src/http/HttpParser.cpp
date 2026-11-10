@@ -1,4 +1,4 @@
-# include "ModuleInterfaces.hpp"
+# include "ModuleInterfaces.hpp" 
 
 namespace webserv
 {
@@ -14,5 +14,9 @@ namespace webserv
     
     HttpParser::~HttpParser() {
         delete _impl;
+    }
+
+    ParseResult HttpParser::feed(const char* data, std::size_t size) {
+
     }
 }
