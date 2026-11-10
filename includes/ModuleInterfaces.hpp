@@ -112,12 +112,14 @@ namespace webserv
     private:
         HttpParser(const HttpParser&);
         HttpParser& operator=(const HttpParser&);
+
+        std::size_t _maxBodyBytes;
         // Pimpl: os dados internos serao definidos no .cpp.
         // As operacoes de copia privadas impedem copias acidentais em C++98.
         struct Impl;
         Impl* _impl;
     };
-
+    
     // Resultado sem a status line e sem os delimitadores HTTP.
     // Headers repetidos sao permitidos, por exemplo Set-Cookie.
     // O participante 3 fornece o resultado sem o serializar em HTTP.
