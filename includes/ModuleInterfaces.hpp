@@ -101,6 +101,8 @@ namespace webserv
         // Permite distinguir fim de entrada de uma requisicao completa;
         // EOF nao transforma uma requisicao truncada numa requisicao valida.
         // Nao significa simplesmente "nao ha dados disponiveis agora".
+        bool    parseRequestLine();
+
         ParseResult endOfInput();
         const HttpRequest& request() const; // Apenas em PARSE_COMPLETE.
         // A referencia devolvida por request() pertence ao parser e so
