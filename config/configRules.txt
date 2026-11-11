@@ -1,0 +1,168 @@
+WEBSERV CONFIGURATION RULES
+
+This document summarizes the rules implemented by the project's parser.
+
+1. FILE AND SYNTAX
+
+- Usage: ./webserv [file.conf]
+- Without an argument, config/default.conf is used.
+- The configuration must be a readable regular file. Symbolic links to regular
+  files are allowed; directories and FIFOs are rejected.
+- Comments start with # and end at the end of the line.
+- Simple directives end with ;. Blocks use { ... }, with no ; after the closing brace.
+- At least one server block is required.
+- Only server blocks are allowed at the top level.
+- Unknown directives or directives used in the wrong block are rejected.
+- Directive names and values are case-sensitive.
+- There is no special support for quoted values or paths containing spaces.
+
+2. SERVER BLOCK
+
+Each server must have at least one listen directive and one location block.
+
+listen IPv4:port;
+  - The IPv4 address must contain exactly four decimal octets between 0 and 255.
+  - The decimal port must be between 1 and 65535.
+  - IP addresses and ports are normalized by removing leading zeros.
+  - Multiple listeners are allowed as long as they do not conflict.
+  - Hostnames, IPv6 addresses, and port-only values are not accepted.
+
+client_max_body_size bytes;
+  - A nonnegative decimal integer representable as std::size_t.
+  - Units such as K or M, signs, and fractional values are not accepted.
+  - Only one definition per server.
+  - Default: 1048576 bytes (1 MiB).
+  - Under the project's contract, 0 allows only empty request bodies.
+
+error_page code path;
+  - A decimal status code between 400 and 599.
+  - One code and one path per directive.
+  - Multiple directives are allowed, but each code may appear only once
+    per server.
+  - Optional. Without this directive, no custom path is configured for that
+    code; handling fallback error pages is the HTTP module's responsibility.
+
+location /path { ... }
+  - The path must start with /.
+  - The same path cannot appear twice in the same server.
+  - / and /uploads may coexist: sharing a prefix is not a conflict.
+  - A location / block is not required.
+  - Location blocks cannot contain other location blocks.
+
+3. LISTENER CONFLICTS
+
+Listeners are compared both within each server and across different servers.
+A conflict exists when the ports are equal and:
+  - the IP addresses are equal; or
+  - at least one IP address is 0.0.0.0.
+
+0.0.0.0 represents all local IPv4 interfaces.
+
+Examples:
+  127.0.0.1:8080 and 127.0.0.1:8080     -> conflict
+  0.0.0.0:8080 and 192.168.1.10:8080    -> conflict
+  127.0.0.1:8080 and 192.168.1.10:8080  -> allowed
+  0.0.0.0:8080 and 127.0.0.1:8081       -> allowed
+
+4. LOCATION BLOCK
+
+root path;
+  - Defines the base directory associated with the route.
+  - Required for a route without a redirect, since the current model has
+    no global, inherited, or default root.
+  - May be omitted for a route that only redirects.
+  - Only one definition per route.
+
+allowed_methods GET POST DELETE;
+  - Accepts one or more of GET, POST, and DELETE.
+  - Methods cannot be repeated in the list.
+  - Only one definition per route.
+  - Default: GET.
+
+directory_listing on;
+directory_listing off;
+  - Accepts only on or off.
+  - Only one definition per route.
+  - Default: off.
+
+index file;
+  - Defines a single index file.
+  - Only one definition per route.
+  - No default value is configured.
+
+upload_enabled on;
+upload_enabled off;
+  - Accepts only on or off.
+  - Only one definition per route.
+  - Default: off.
+
+upload_directory path;
+  - Defines the destination directory for uploads.
+  - Only one definition per route.
+  - Required when upload_enabled is on.
+
+cgi_interpreter .ext path;
+  - Maps a file extension to a CGI interpreter path.
+  - The extension must start with . and contain at least one more character.
+  - Multiple directives are allowed for different extensions.
+  - Each extension may be defined only once per route.
+  - No interpreters are configured by default.
+
+return code /target;
+  - Configures a redirect.
+  - Allowed status codes: 301, 302, 303, 307, and 308.
+  - The target must start with /; URLs starting with http:// or https://
+    are not accepted by the current parser.
+  - Only one definition per route.
+  - Without this directive, no redirect is configured.
+
+5. COMBINATIONS AND DEPENDENCIES
+
+- upload_enabled on requires root, upload_directory, and POST in allowed_methods.
+- return cannot be combined with index, upload_enabled on,
+  directory_listing on, or cgi_interpreter.
+- A route that only redirects may omit root. Defining root in a redirect route
+  is not, by itself, an error.
+- Directive order does not affect these checks: dependencies are validated
+  at the end of the block.
+- Settings from one route are not inherited by other routes.
+
+6. PATHS AND RESPONSIBILITIES
+
+- The parser stores paths for content, error pages, uploads, and CGI;
+  it does not currently check whether these resources exist or have suitable permissions.
+- Relative paths are stored as written. The parser does not convert them into
+  paths relative to the configuration file's directory.
+- When passed directly to filesystem functions, relative paths are resolved
+  against the program's current working directory.
+- Enforcing the request body limit, mapping URLs to files, serving pages,
+  running CGI, and handling uploads are responsibilities of the consuming modules.
+- The syntax and defaults described here are project choices, not a complete
+  reproduction of NGINX configuration.
+
+7. EXAMPLES
+
+Minimal configuration:
+
+server {
+    listen 127.0.0.1:8080;
+
+    location / {
+        root ./www/html;
+    }
+}
+
+A route that only redirects, placed inside a server block:
+
+location /old {
+    return 301 /new;
+}
+
+An upload route, placed inside a server block:
+
+location /uploads {
+    root ./www/uploads;
+    allowed_methods GET POST DELETE;
+    upload_enabled on;
+    upload_directory ./www/uploads;
+}
