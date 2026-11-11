@@ -102,6 +102,8 @@ namespace webserv
         // EOF nao transforma uma requisicao truncada numa requisicao valida.
         // Nao significa simplesmente "nao ha dados disponiveis agora".
         bool    parseRequestLine();
+        bool    parseHeaders();
+        bool    validateHeaders();
 
         ParseResult endOfInput();
         const HttpRequest& request() const; // Apenas em PARSE_COMPLETE.
