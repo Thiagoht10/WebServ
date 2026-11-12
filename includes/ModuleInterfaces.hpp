@@ -103,7 +103,10 @@ namespace webserv
         // Nao significa simplesmente "nao ha dados disponiveis agora".
         bool    parseRequestLine();
         bool    parseHeaders();
-        bool    validateHeaders();
+
+        bool    validateHeaders(HttpHeaders&    headers);
+        bool    isHeaderName(std::string name, const std::string&   expected); // Encontra duplicados, expected deve ser uppercase
+        std::size_t countHeaderNameOccurrences(const HttpHeaders& headers, const std::string&   expected);
 
         ParseResult endOfInput();
         const HttpRequest& request() const; // Apenas em PARSE_COMPLETE.

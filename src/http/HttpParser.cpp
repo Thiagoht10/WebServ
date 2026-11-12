@@ -26,11 +26,13 @@ namespace webserv
         std::size_t lineLength;
 
         bool    foundHeaderEnd;
+        bool    httpVersion;
     };
 
     HttpParser::HttpParser(std::size_t maxBodyBytes) : _maxBodyBytes(maxBodyBytes), 
         _impl(new Impl()) {
         _impl->foundHeaderEnd = false;
+        _impl->httpVersion = false;
         _impl->headerStart = 0;
         _impl->headerEnd = 0;
         _impl->bodyStart = 0;
@@ -60,10 +62,10 @@ namespace webserv
         }
         if (!parseRequestLine() || !parseHeaders())
             return _impl->parseResult;
-        
     }
 
     bool    HttpParser::parseRequestLine() {
+        // extrai a request line
         _impl->requestEnd = _impl->data.find("\r\n", _impl->requestStart);
         if (_impl->requestEnd == std::string::npos)
         {
@@ -76,6 +78,7 @@ namespace webserv
             _impl->parseResult.state = PARSE_ERROR;
             return false;
         }
+        // comeca por encontrar o primeiro espaco para poder separar em seguida q request line em method, target e version
         _impl->lineEnd = _impl->requestLine.find(" ");
         if (_impl->lineEnd == std::string::npos || _impl->lineEnd == 0)
         {
@@ -107,6 +110,22 @@ namespace webserv
             _impl->parseResult.state = PARSE_ERROR;
             return false;
         }
+
+        if (_impl->httpRequest.method != "GET" && _impl->httpRequest.method != "POST" 
+            && _impl->httpRequest.method != "DELETE")
+        {
+            _impl->parseResult.state = PARSE_ERROR;
+            return false;
+        }
+
+        if (_impl->httpRequest.version == "HTTP/1.1")
+            _impl->httpVersion = true;
+        else if (_impl->httpRequest.version != "HTTP/1.0")
+        {
+            _impl->parseResult.state = PARSE_ERROR;
+            return false;
+        }
+
         return true;
     }
 
@@ -116,6 +135,7 @@ namespace webserv
         _impl->lineStart = _impl->headerStart;
         while (_impl->headerStart < _impl->headerEnd)
         {
+            //extrai um header
             _impl->lineEnd = _impl->data.find("\r\n", _impl->lineStart);
             if (_impl->lineEnd == std::string::npos || _impl->lineEnd > _impl->headerEnd)
             {
@@ -125,6 +145,7 @@ namespace webserv
             _impl->lineLength = _impl->lineEnd - _impl->lineStart;
             _impl->headerLine = _impl->data.substr(_impl->lineStart, _impl->lineLength);
 
+            // divide o header em name e value
             _impl->headerSeparator = _impl->headerLine.find(':');
             if (_impl->headerSeparator == std::string::npos || _impl->headerSeparator == 0)
             {
@@ -139,7 +160,7 @@ namespace webserv
             _impl->lineStart = _impl->lineEnd + 2;
             _impl->headerStart = _impl->lineEnd + 2;
         }
-        if (!validateHeaders())
+        if (!validateHeaders(_impl->httpRequest.headers))
         {
             _impl->parseResult.state = PARSE_ERROR;
             return false;
@@ -147,13 +168,17 @@ namespace webserv
         return true;
     }
 
-    bool    HttpParser::validateHeaders() {
+    bool    HttpParser::validateHeaders(HttpHeaders&    headers) {
         HttpHeaders::iterator it;
+        std::size_t hostCount = 0;
         std::size_t first;
         std::size_t last;
 
-        for (it = _impl->httpRequest.headers.begin(); it != _impl->httpRequest.headers.end(); ++it)
+        for (it = headers.begin(); it != headers.end(); ++it)
         {
+            if (it->name.empty())
+                return false;
+            // Da um trim no value de qualquer header se for preciso removendo trailing spaces e leading spaces
             if (it->name.find(' ') != std::string::npos || it->name.find('\t') != std::string::npos)
                 return false;
             first = it->value.find_first_not_of(" \t");
@@ -164,8 +189,63 @@ namespace webserv
                 last = it->value.find_last_not_of(" \t");
                 it->value = it->value.substr(first, last - first + 1);
             }
+
+            // verifica se o value do header "HOST" e empty
+            if (isHeaderName(it->name, "HOST") && it->value.empty() 
+                && _impl->httpVersion)
+            {
+                _impl->parseResult.state = PARSE_ERROR;
+                return false;
+            }
         }
+
+        // verifica se existe um "HOST" na versao 1.1 e se existe mais de 1 header de "HOST"
+        hostCount = countHeaderNameOccurrences(headers, "HOST");
+        if (_impl->httpVersion && hostCount != 1)
+        {
+            _impl->parseResult.state = PARSE_ERROR;
+            return false;
+        }
+        else if (!_impl->httpVersion && hostCount > 1)
+        {
+            _impl->parseResult.state = PARSE_ERROR;
+            return false;
+        }
+
+        // verificar se existe um header de "Transfer-Encoding" de acordo com a versao HTTP
+        if (countHeaderNameOccurrences(headers, "TRANSFER-ENCODING") != 0 
+            && !_impl->httpVersion)
+        {
+            _impl->parseResult.state = PARSE_ERROR;
+            return false;
+        }
+        // verifica se existe "Transfer-Encoding" e "Content-Length" na mesma request
+        if (countHeaderNameOccurrences(headers, "TRANSFER-ENCODING") != 0 
+            && countHeaderNameOccurrences(headers, "CONTENT-LENGTH") != 0)
+        {
+            _impl->parseResult.state = PARSE_ERROR;
+            return false;
+        }
+
         return true;
+    }
+
+    std::size_t HttpParser::countHeaderNameOccurrences(const HttpHeaders& headers, const std::string& expected) {
+        HttpHeaders::const_iterator it;
+        std::size_t count = 0;
+
+        for (it = headers.begin(); it != headers.end(); ++it)
+        {
+            if (isHeaderName(it->name, expected))
+                count++;
+        }
+        return count;
+    }
+
+    bool    HttpParser::isHeaderName(std::string name, const std::string& expected) {
+        for (std::size_t i = 0; i < name.size(); i++)
+            name[i] = std::toupper(static_cast<unsigned char>(name[i]));
+        return (name == expected);
     }
 
     const HttpRequest&  HttpParser::request() const {
