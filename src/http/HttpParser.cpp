@@ -62,6 +62,9 @@ namespace webserv
         }
         if (!parseRequestLine() || !parseHeaders())
             return _impl->parseResult;
+
+        _impl->parseResult.state = PARSE_COMPLETE;
+        return _impl->parseResult;
     }
 
     bool    HttpParser::parseRequestLine() {
@@ -197,6 +200,8 @@ namespace webserv
                 _impl->parseResult.state = PARSE_ERROR;
                 return false;
             }
+            if (!isValidHeaderName(it->name))
+                return false;
         }
 
         // verifica se existe um "HOST" na versao 1.1 e se existe mais de 1 header de "HOST"
@@ -212,21 +217,8 @@ namespace webserv
             return false;
         }
 
-        // verificar se existe um header de "Transfer-Encoding" de acordo com a versao HTTP
-        if (countHeaderNameOccurrences(headers, "TRANSFER-ENCODING") != 0 
-            && !_impl->httpVersion)
-        {
-            _impl->parseResult.state = PARSE_ERROR;
+        if (!isValidTransferEncodingHeader(headers))
             return false;
-        }
-        // verifica se existe "Transfer-Encoding" e "Content-Length" na mesma request
-        if (countHeaderNameOccurrences(headers, "TRANSFER-ENCODING") != 0 
-            && countHeaderNameOccurrences(headers, "CONTENT-LENGTH") != 0)
-        {
-            _impl->parseResult.state = PARSE_ERROR;
-            return false;
-        }
-
         return true;
     }
 
@@ -242,10 +234,100 @@ namespace webserv
         return count;
     }
 
-    bool    HttpParser::isHeaderName(std::string name, const std::string& expected) {
+    bool    HttpParser::isHeaderName(std::string name, const std::string& expected) const {
         for (std::size_t i = 0; i < name.size(); i++)
             name[i] = std::toupper(static_cast<unsigned char>(name[i]));
         return (name == expected);
+    }
+
+    bool    HttpParser::isValidHeaderName(const std::string& name) const {
+        if (name.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&'*+-.^_`|~") 
+            != std::string::npos)
+        {
+            _impl->parseResult.state = PARSE_ERROR;
+            return false;
+        }
+        return true;
+    }
+
+    bool    HttpParser::isValidTransferEncodingHeader(const HttpHeaders&  headers) {
+        // verificar se existe um header de "Transfer-Encoding" de acordo com a versao HTTP
+        if (countHeaderNameOccurrences(headers, "TRANSFER-ENCODING") != 0 
+            && !_impl->httpVersion)
+        {
+            _impl->parseResult.state = PARSE_ERROR;
+            return false;
+        }
+        // verifica se existe "Transfer-Encoding" e "Content-Length" na mesma request
+        if (countHeaderNameOccurrences(headers, "TRANSFER-ENCODING") != 0 
+            && countHeaderNameOccurrences(headers, "CONTENT-LENGTH") != 0)
+        {
+            _impl->parseResult.state = PARSE_ERROR;
+            return false;
+        }
+        return true;
+    }
+
+    bool    HttpParser::isValidContentLengthHeader(const HttpHeaders&    headers) {
+        HttpHeaders::const_iterator header;
+
+        if (countHeaderNameOccurrences(headers, "CONTENT-LENGTH") > 1
+            && !isDuplicatesSameValue(headers, "CONTENT-LENGTH"))
+        {
+            _impl->parseResult.state = PARSE_ERROR;
+            return false;
+        }
+        header = findHeader(headers, "CONTENT-LENGTH");
+        if (header == headers.end())
+            return true;
+        if (header->value.empty())
+        {
+            _impl->parseResult.state = PARSE_ERROR;
+            _impl->parseResult.httpStatus = 400;
+            return false;
+        }
+        for (std::size_t i = 0; i < header->value.size(); i++)
+        {
+            if (!isdigit(static_cast<unsigned char>(header->value[i])))
+            {
+                _impl->parseResult.state = PARSE_ERROR;
+                _impl->parseResult.httpStatus = 400;
+                return false;
+            }
+        }
+
+        
+    }
+
+    bool    HttpParser::isDuplicatesSameValue(const HttpHeaders& headers, const std::string& expected) {
+        HttpHeaders::const_iterator it;
+        std::string dup;
+        bool    firstFound = false;
+
+        for (it = headers.begin(); it != headers.end(); ++it)
+        {
+            if (isHeaderName(it->value, expected))
+            {
+                if (firstFound && dup != it->value)
+                    return false;
+                else if (!firstFound)
+                {
+                    dup = it->value;
+                    firstFound = true;
+                }
+            }
+        }
+        return true;
+    }
+
+    HttpHeaders::const_iterator&    HttpParser::findHeader(const HttpHeaders& headers, const std::string& name) {
+        HttpHeaders::const_iterator it;
+        for (it = headers.begin(); it != headers.end(); ++it)
+        {
+            if (isHeaderName(name, "CONTENT-LENGTH"))
+                return it;
+        }
+        return it;
     }
 
     const HttpRequest&  HttpParser::request() const {

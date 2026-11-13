@@ -105,7 +105,14 @@ namespace webserv
         bool    parseHeaders();
 
         bool    validateHeaders(HttpHeaders&    headers);
-        bool    isHeaderName(std::string name, const std::string&   expected); // Encontra duplicados, expected deve ser uppercase
+        bool    isHeaderName(std::string name, const std::string&   expected) const; // Encontra duplicados, expected deve ser uppercase
+        bool    isValidHeaderName(const std::string&    name) const;
+        bool    isValidTransferEncodingHeader(const HttpHeaders&    headers);
+        bool    isValidContentLengthHeader(const HttpHeaders&   headers);
+        bool    isDuplicatesSameValue(const HttpHeaders& headers, const std::string& expected);
+
+        HttpHeaders::const_iterator&    findHeader(const HttpHeaders& headers, const std::string& name);
+
         std::size_t countHeaderNameOccurrences(const HttpHeaders& headers, const std::string&   expected);
 
         ParseResult endOfInput();
