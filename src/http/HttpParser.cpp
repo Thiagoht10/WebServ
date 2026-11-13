@@ -320,11 +320,11 @@ namespace webserv
         return true;
     }
 
-    HttpHeaders::const_iterator&    HttpParser::findHeader(const HttpHeaders& headers, const std::string& name) {
+    HttpHeaders::const_iterator&    HttpParser::findHeader(const HttpHeaders& headers, const std::string& expected) {
         HttpHeaders::const_iterator it;
         for (it = headers.begin(); it != headers.end(); ++it)
         {
-            if (isHeaderName(name, "CONTENT-LENGTH"))
+            if (isHeaderName(expected, "CONTENT-LENGTH"))
                 return it;
         }
         return it;

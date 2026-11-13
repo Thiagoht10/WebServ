@@ -111,7 +111,7 @@ namespace webserv
         bool    isValidContentLengthHeader(const HttpHeaders&   headers);
         bool    isDuplicatesSameValue(const HttpHeaders& headers, const std::string& expected);
 
-        HttpHeaders::const_iterator&    findHeader(const HttpHeaders& headers, const std::string& name);
+        HttpHeaders::const_iterator&    findHeader(const HttpHeaders& headers, const std::string& expected);
 
         std::size_t countHeaderNameOccurrences(const HttpHeaders& headers, const std::string&   expected);
 
