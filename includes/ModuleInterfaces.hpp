@@ -105,15 +105,22 @@ namespace webserv
         bool    parseHeaders();
 
         bool    validateHeaders(HttpHeaders&    headers);
-        bool    isHeaderName(std::string name, const std::string&   expected) const; // Encontra duplicados, expected deve ser uppercase
+        bool    isHeaderName(std::string name, const std::string&   expected) const; // Encontra um header no vector de headers, name: nome do header, expected: nome do header que queremos encontrar
+        bool    compareTwoStringsCaseInsensitive(std::string str, const std::string&    expected) const; // Compara duas strings independentemente se tem uper case ou nao. expected deve ser uppercase
         bool    isValidHeaderName(const std::string&    name) const;
         bool    isValidTransferEncodingHeader(const HttpHeaders&    headers);
         bool    isValidContentLengthHeader(const HttpHeaders&   headers);
         bool    isDuplicatesSameValue(const HttpHeaders& headers, const std::string& expected);
+        bool    isOnlyWhiteSpaces(const std::string& val) const;
+        bool    isValidHttpVersion(const std::string& version);
+        bool    isSupportedTransferEncoding(const std::string& token) const;
 
-        HttpHeaders::const_iterator&    findHeader(const HttpHeaders& headers, const std::string& expected);
+        HttpHeaders::const_iterator    findHeader(const HttpHeaders& headers, const std::string& expected);
 
         std::size_t countHeaderNameOccurrences(const HttpHeaders& headers, const std::string&   expected);
+        std::string trimStr(const std::string& str);
+
+        bool    fillParseResult(ParseState state, int httpStatus, std::string details, bool  tf);
 
         ParseResult endOfInput();
         const HttpRequest& request() const; // Apenas em PARSE_COMPLETE.

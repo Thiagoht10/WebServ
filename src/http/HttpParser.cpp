@@ -121,14 +121,8 @@ namespace webserv
             return false;
         }
 
-        if (_impl->httpRequest.version == "HTTP/1.1")
-            _impl->httpVersion = true;
-        else if (_impl->httpRequest.version != "HTTP/1.0")
-        {
-            _impl->parseResult.state = PARSE_ERROR;
+        if (!isValidHttpVersion(_impl->httpRequest.version))
             return false;
-        }
-
         return true;
     }
 
@@ -151,10 +145,7 @@ namespace webserv
             // divide o header em name e value
             _impl->headerSeparator = _impl->headerLine.find(':');
             if (_impl->headerSeparator == std::string::npos || _impl->headerSeparator == 0)
-            {
-                _impl->parseResult.state = PARSE_ERROR;
-                return false;
-            }
+                return (fillParseResult(PARSE_ERROR, 400, NULL, false));
             header.name = _impl->headerLine.substr(0, _impl->headerSeparator);
 
             header.value = _impl->headerLine.substr(_impl->headerSeparator + 1);
@@ -164,10 +155,8 @@ namespace webserv
             _impl->headerStart = _impl->lineEnd + 2;
         }
         if (!validateHeaders(_impl->httpRequest.headers))
-        {
-            _impl->parseResult.state = PARSE_ERROR;
             return false;
-        }
+        _impl->parseResult.consumed = _impl->bodyStart - 1;
         return true;
     }
 
@@ -179,11 +168,11 @@ namespace webserv
 
         for (it = headers.begin(); it != headers.end(); ++it)
         {
-            if (it->name.empty())
-                return false;
+            if (it->name.empty() || isOnlyWhiteSpaces(it->name))
+                return (fillParseResult(PARSE_ERROR, 400, NULL, false));
             // Da um trim no value de qualquer header se for preciso removendo trailing spaces e leading spaces
             if (it->name.find(' ') != std::string::npos || it->name.find('\t') != std::string::npos)
-                return false;
+                return (fillParseResult(PARSE_ERROR, 400, NULL, false));
             first = it->value.find_first_not_of(" \t");
             if (first == std::string::npos)
                 it->value.clear();
@@ -196,28 +185,21 @@ namespace webserv
             // verifica se o value do header "HOST" e empty
             if (isHeaderName(it->name, "HOST") && it->value.empty() 
                 && _impl->httpVersion)
-            {
-                _impl->parseResult.state = PARSE_ERROR;
-                return false;
-            }
+                return (fillParseResult(PARSE_ERROR, 400, NULL, false));
             if (!isValidHeaderName(it->name))
-                return false;
+                return (fillParseResult(PARSE_ERROR, 400, NULL, false));
         }
 
         // verifica se existe um "HOST" na versao 1.1 e se existe mais de 1 header de "HOST"
         hostCount = countHeaderNameOccurrences(headers, "HOST");
         if (_impl->httpVersion && hostCount != 1)
-        {
-            _impl->parseResult.state = PARSE_ERROR;
-            return false;
-        }
+            return (fillParseResult(PARSE_ERROR, 400, NULL, false));
         else if (!_impl->httpVersion && hostCount > 1)
-        {
-            _impl->parseResult.state = PARSE_ERROR;
-            return false;
-        }
+            return (fillParseResult(PARSE_ERROR, 400, NULL, false));
 
         if (!isValidTransferEncodingHeader(headers))
+            return false;
+        if (!isValidContentLengthHeader(headers))
             return false;
         return true;
     }
@@ -240,30 +222,100 @@ namespace webserv
         return (name == expected);
     }
 
+    bool    HttpParser::compareTwoStringsCaseInsensitive(std::string str, const std::string& expected) const {
+        for (std::size_t i = 0; i < str.size(); i++)
+            str[i] = std::toupper(static_cast<unsigned char>(str[i]));
+        return (str == expected);
+    }
+
     bool    HttpParser::isValidHeaderName(const std::string& name) const {
         if (name.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&'*+-.^_`|~") 
             != std::string::npos)
-        {
-            _impl->parseResult.state = PARSE_ERROR;
             return false;
-        }
+        return true;
+    }
+
+    bool    HttpParser::isValidHttpVersion(const std::string& version) {
+        if (version.length() != 8)
+            return (fillParseResult(PARSE_ERROR, 400, NULL, false));
+        if (version.compare(0, 5, "HTTP/") != 0)
+            return (fillParseResult(PARSE_ERROR, 400, NULL, false));
+
+        if (!isdigit(static_cast<unsigned char>(version[5]))
+            || version[6] != '.'
+            || !isdigit(static_cast<unsigned char>(version[7])))
+            return (fillParseResult(PARSE_ERROR, 400, NULL, false));
+            
+        if (version == "HTTP/1.1")
+            _impl->httpVersion = true;
+        else if (version != "HTTP/1.0")
+            return (fillParseResult(PARSE_ERROR, 505, NULL, false));
+
         return true;
     }
 
     bool    HttpParser::isValidTransferEncodingHeader(const HttpHeaders&  headers) {
+        bool    chunkedLast = false;
+        bool    chunkedFound = false;
+        HttpHeaders::const_iterator it;
+        std::size_t start;
+        std::size_t end;
+
         // verificar se existe um header de "Transfer-Encoding" de acordo com a versao HTTP
         if (countHeaderNameOccurrences(headers, "TRANSFER-ENCODING") != 0 
             && !_impl->httpVersion)
-        {
-            _impl->parseResult.state = PARSE_ERROR;
-            return false;
-        }
+            return (fillParseResult(PARSE_ERROR, 400, NULL, false));
         // verifica se existe "Transfer-Encoding" e "Content-Length" na mesma request
         if (countHeaderNameOccurrences(headers, "TRANSFER-ENCODING") != 0 
             && countHeaderNameOccurrences(headers, "CONTENT-LENGTH") != 0)
+            return (fillParseResult(PARSE_ERROR, 400, NULL, false));
+        
+        it = findHeader(headers, "TRANSFER-ENCODING");
+        if (it == headers.end())
+            return true;
+        else
         {
-            _impl->parseResult.state = PARSE_ERROR;
-            return false;
+            while (it != headers.end())
+            {
+                start = 0;
+                if (!isHeaderName(it->name, "TRANSFER-ENCODING"))
+                {
+                    ++it;
+                    continue ;
+                }
+                while (start < it->value.size())
+                {
+                    end = it->value.find(',', start);
+                    if (end == std::string::npos)
+                        end = it->value.size();
+                    std::string token = it->value.substr(start, end - start);
+                    token = trimStr(token);
+                    if (token.empty())
+                        return (fillParseResult(PARSE_ERROR, 400, NULL, false));
+                    if (compareTwoStringsCaseInsensitive(token, "CHUNKED") && !chunkedFound)
+                        chunkedFound = true;
+                    else if (compareTwoStringsCaseInsensitive(token, "CHUNKED") && chunkedFound)
+                        return (fillParseResult(PARSE_ERROR, 400, NULL, false));
+
+                    if (!isSupportedTransferEncoding(token) && !chunkedFound)
+                        return (fillParseResult(PARSE_ERROR, 501, NULL, false));
+                    else if (!isSupportedTransferEncoding(token) && chunkedFound)
+                        return (fillParseResult(PARSE_ERROR, 400, NULL, false));
+
+                    if (compareTwoStringsCaseInsensitive(token, "CHUNKED"))
+                    {
+                        if (end != it->value.size())
+                            return (fillParseResult(PARSE_ERROR, 400, NULL, false));
+                        chunkedLast = true;
+                    }
+                    start = end + 1;
+                }
+                ++it;
+            }
+            if (!chunkedFound)
+                return (fillParseResult(PARSE_ERROR, 501, NULL, false));
+            if (!chunkedLast)
+                return (fillParseResult(PARSE_ERROR, 400, NULL, false));
         }
         return true;
     }
@@ -273,30 +325,18 @@ namespace webserv
 
         if (countHeaderNameOccurrences(headers, "CONTENT-LENGTH") > 1
             && !isDuplicatesSameValue(headers, "CONTENT-LENGTH"))
-        {
-            _impl->parseResult.state = PARSE_ERROR;
-            return false;
-        }
+            return (fillParseResult(PARSE_ERROR, 400, NULL, false));
         header = findHeader(headers, "CONTENT-LENGTH");
         if (header == headers.end())
             return true;
         if (header->value.empty())
-        {
-            _impl->parseResult.state = PARSE_ERROR;
-            _impl->parseResult.httpStatus = 400;
-            return false;
-        }
+            return (fillParseResult(PARSE_ERROR, 400, NULL, false));
         for (std::size_t i = 0; i < header->value.size(); i++)
         {
             if (!isdigit(static_cast<unsigned char>(header->value[i])))
-            {
-                _impl->parseResult.state = PARSE_ERROR;
-                _impl->parseResult.httpStatus = 400;
-                return false;
-            }
+                return (fillParseResult(PARSE_ERROR, 400, NULL, false));
         }
-
-        
+        return true;        
     }
 
     bool    HttpParser::isDuplicatesSameValue(const HttpHeaders& headers, const std::string& expected) {
@@ -306,7 +346,7 @@ namespace webserv
 
         for (it = headers.begin(); it != headers.end(); ++it)
         {
-            if (isHeaderName(it->value, expected))
+            if (isHeaderName(it->name, expected))
             {
                 if (firstFound && dup != it->value)
                     return false;
@@ -320,14 +360,46 @@ namespace webserv
         return true;
     }
 
-    HttpHeaders::const_iterator&    HttpParser::findHeader(const HttpHeaders& headers, const std::string& expected) {
+    HttpHeaders::const_iterator    HttpParser::findHeader(const HttpHeaders& headers, const std::string& expected) {
         HttpHeaders::const_iterator it;
         for (it = headers.begin(); it != headers.end(); ++it)
         {
-            if (isHeaderName(expected, "CONTENT-LENGTH"))
+            if (isHeaderName(it->name, expected))
                 return it;
         }
         return it;
+    }
+
+    bool    HttpParser::fillParseResult(ParseState state, int httpStatus, std::string details, bool tf) {
+        _impl->parseResult.state = state;
+        _impl->parseResult.httpStatus = httpStatus;
+        _impl->parseResult.detail = details;
+        return tf;
+    }
+
+    bool    HttpParser::isOnlyWhiteSpaces(const std::string& val) const {
+        return val.find_first_not_of(" \t") == std::string::npos;
+    }
+
+    bool    HttpParser::isSupportedTransferEncoding(const std::string& token) const {
+        if (compareTwoStringsCaseInsensitive(token, "GZIP")
+            || compareTwoStringsCaseInsensitive(token, "COMPRESS")
+            || compareTwoStringsCaseInsensitive(token, "DEFLATE")
+            || compareTwoStringsCaseInsensitive(token, "BR")
+            || compareTwoStringsCaseInsensitive(token, "ZSTD"))
+            return false;
+        else if (compareTwoStringsCaseInsensitive(token, "CHUNKED"))
+            return true;
+        return false;
+    }
+
+    std::string HttpParser::trimStr(const std::string& str) {
+        std::size_t first = str.find_first_not_of(" \t");
+        if (first == std::string::npos)
+            return "";
+        std::size_t last = str.find_last_not_of(" \t");
+
+        return str.substr(first, last - first + 1);
     }
 
     const HttpRequest&  HttpParser::request() const {
