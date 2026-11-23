@@ -1,14 +1,28 @@
 # include "../../includes/ModuleInterfaces.hpp"
+# include <iostream>
 # include <string>
+# include <algorithm>
 
 namespace webserv
 {
     struct HttpParser::Impl
     {
+        enum parseStage
+        {
+            REQUEST_LINE,
+            HEADERS,
+            BODY,
+            COMPLETE,
+        };
+
+        parseStage  stage;
+
         HttpRequest httpRequest;
         ParseResult parseResult;
 
         std::string data;
+        std::size_t dataPrevSize;
+        std::size_t feedSize;
 
         std::string requestLine;
         std::string headerLine;
@@ -25,14 +39,16 @@ namespace webserv
         std::size_t lineEnd;
         std::size_t lineLength;
 
-        bool    foundHeaderEnd;
         bool    httpVersion;
+
     };
 
     HttpParser::HttpParser(std::size_t maxBodyBytes) : _maxBodyBytes(maxBodyBytes), 
         _impl(new Impl()) {
-        _impl->foundHeaderEnd = false;
+        _impl->stage = Impl::REQUEST_LINE;
         _impl->httpVersion = false;
+        _impl->feedSize = 0;
+        _impl->dataPrevSize = 0;
         _impl->headerStart = 0;
         _impl->headerEnd = 0;
         _impl->bodyStart = 0;
@@ -48,23 +64,32 @@ namespace webserv
     }
 
     ParseResult HttpParser::feed(const char* data, std::size_t size) {
-        _impl->data.append(data, size);
-        if (!_impl->foundHeaderEnd)
-        {
-            _impl->headerEnd = _impl->data.find("\r\n\r\n");
-            if (_impl->headerEnd == std::string::npos)
-            {
-                _impl->parseResult.state = PARSE_NEED_MORE;
-                return _impl->parseResult;
-            }
-            _impl->bodyStart = _impl->headerEnd + 4;
-            _impl->foundHeaderEnd = true;
-        }
-        if (!parseRequestLine() || !parseHeaders())
-            return _impl->parseResult;
+        _impl->dataPrevSize = _impl->data.size();
+        _impl->feedSize = size;
 
-        _impl->parseResult.state = PARSE_COMPLETE;
-        return _impl->parseResult;
+        _impl->parseResult.consumed = 0;
+        _impl->data.append(data, size);
+        if (_impl->stage == Impl::REQUEST_LINE)
+        {
+            if (!parseRequestLine())
+                return _impl->parseResult;
+            _impl->parseResult.consumed = calculateConsumed(_impl->requestEnd + 2);
+            _impl->stage = Impl::HEADERS;
+        }
+
+        if (_impl->stage == Impl::HEADERS)
+        {
+            if (!parseHeaders())
+                return _impl->parseResult;
+            _impl->bodyStart;
+        }
+
+        if (_impl->stage == Impl::BODY)
+        {
+
+        }
+
+
     }
 
     bool    HttpParser::parseRequestLine() {
@@ -72,54 +97,41 @@ namespace webserv
         _impl->requestEnd = _impl->data.find("\r\n", _impl->requestStart);
         if (_impl->requestEnd == std::string::npos)
         {
-            _impl->parseResult.state = PARSE_NEED_MORE;
-            return false;
+            _impl->parseResult.consumed = _impl->feedSize;
+            return (fillParseResult(PARSE_NEED_MORE, 0, NULL, false));
         }
         _impl->requestLine = _impl->data.substr(_impl->requestStart , _impl->requestEnd - _impl->requestStart);
         if (_impl->requestLine.find('\t') != std::string::npos)
-        {
-            _impl->parseResult.state = PARSE_ERROR;
-            return false;
-        }
+            return (fillParseResult(PARSE_ERROR, 400, NULL, false));
+    
         // comeca por encontrar o primeiro espaco para poder separar em seguida q request line em method, target e version
         _impl->lineEnd = _impl->requestLine.find(" ");
         if (_impl->lineEnd == std::string::npos || _impl->lineEnd == 0)
-        {
-            _impl->parseResult.state = PARSE_ERROR;
-            return false;
-        }
+            return (fillParseResult(PARSE_ERROR, 400, NULL, false));
+
         _impl->lineLength = _impl->lineEnd - _impl->lineStart;
         _impl->httpRequest.method = _impl->requestLine.substr(_impl->lineStart, _impl->lineLength);
 
         _impl->lineStart = _impl->lineEnd + 1;
         _impl->lineEnd = _impl->requestLine.find(" ", _impl->lineStart);
+
         if (_impl->lineEnd == std::string::npos || _impl->lineEnd == _impl->lineStart)
-        {
-            _impl->parseResult.state = PARSE_ERROR;
-            return false;
-        }
+            return (fillParseResult(PARSE_ERROR, 400, NULL, false));
+
         _impl->lineLength = _impl->lineEnd - _impl->lineStart;
         _impl->httpRequest.target = _impl->requestLine.substr(_impl->lineStart, _impl->lineLength);
 
         _impl->lineStart = _impl->lineEnd + 1;
         if (_impl->lineStart >= _impl->requestLine.size())
-        {
-            _impl->parseResult.state = PARSE_ERROR;
-            return false;
-        }
+            return (fillParseResult(PARSE_ERROR, 400, NULL, false));
+
         _impl->httpRequest.version = _impl->requestLine.substr(_impl->lineStart);
         if (_impl->httpRequest.version.find(' ') != std::string::npos)
-        {
-            _impl->parseResult.state = PARSE_ERROR;
-            return false;
-        }
+            return (fillParseResult(PARSE_ERROR, 400, NULL, false));
 
         if (_impl->httpRequest.method != "GET" && _impl->httpRequest.method != "POST" 
             && _impl->httpRequest.method != "DELETE")
-        {
-            _impl->parseResult.state = PARSE_ERROR;
-            return false;
-        }
+            return (fillParseResult(PARSE_ERROR, 405, NULL, false));
 
         if (!isValidHttpVersion(_impl->httpRequest.version))
             return false;
@@ -128,6 +140,15 @@ namespace webserv
 
     bool    HttpParser::parseHeaders() {
         HttpHeader header;
+
+        _impl->headerEnd = _impl->data.find("\r\n\r\n");
+        if (_impl->headerEnd == std::string::npos)
+        {
+            _impl->parseResult.consumed = _impl->feedSize;
+            return (fillParseResult(PARSE_NEED_MORE, 0, NULL, false));
+        }
+        _impl->bodyStart = _impl->headerEnd + 4;
+
         _impl->headerStart = _impl->requestEnd + 2;
         _impl->lineStart = _impl->headerStart;
         while (_impl->headerStart < _impl->headerEnd)
@@ -135,10 +156,7 @@ namespace webserv
             //extrai um header
             _impl->lineEnd = _impl->data.find("\r\n", _impl->lineStart);
             if (_impl->lineEnd == std::string::npos || _impl->lineEnd > _impl->headerEnd)
-            {
-                _impl->parseResult.state = PARSE_ERROR;
-                return false;
-            }
+                return (fillParseResult(PARSE_ERROR, 400, NULL, false));
             _impl->lineLength = _impl->lineEnd - _impl->lineStart;
             _impl->headerLine = _impl->data.substr(_impl->lineStart, _impl->lineLength);
 
@@ -156,7 +174,6 @@ namespace webserv
         }
         if (!validateHeaders(_impl->httpRequest.headers))
             return false;
-        _impl->parseResult.consumed = _impl->bodyStart - 1;
         return true;
     }
 
@@ -170,9 +187,11 @@ namespace webserv
         {
             if (it->name.empty() || isOnlyWhiteSpaces(it->name))
                 return (fillParseResult(PARSE_ERROR, 400, NULL, false));
+
             // Da um trim no value de qualquer header se for preciso removendo trailing spaces e leading spaces
             if (it->name.find(' ') != std::string::npos || it->name.find('\t') != std::string::npos)
                 return (fillParseResult(PARSE_ERROR, 400, NULL, false));
+
             first = it->value.find_first_not_of(" \t");
             if (first == std::string::npos)
                 it->value.clear();
@@ -199,6 +218,7 @@ namespace webserv
 
         if (!isValidTransferEncodingHeader(headers))
             return false;
+
         if (!isValidContentLengthHeader(headers))
             return false;
         return true;
@@ -222,17 +242,31 @@ namespace webserv
         return (name == expected);
     }
 
-    bool    HttpParser::compareTwoStringsCaseInsensitive(std::string str, const std::string& expected) const {
-        for (std::size_t i = 0; i < str.size(); i++)
-            str[i] = std::toupper(static_cast<unsigned char>(str[i]));
-        return (str == expected);
-    }
-
     bool    HttpParser::isValidHeaderName(const std::string& name) const {
         if (name.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&'*+-.^_`|~") 
             != std::string::npos)
             return false;
         return true;
+    }
+
+    bool    HttpParser::parseBody() {
+        HttpHeaders::const_iterator header;
+
+        if (countHeaderNameOccurrences(_impl->httpRequest.headers, "CONTENT-LENGTH") == 1)
+        {
+            header = findHeader(_impl->httpRequest.headers, "CONTENT-LENGTH");
+            
+        }
+        else
+        {
+            header = findHeader(_impl->httpRequest.headers, "TRANSFER-ENCODING");
+        }
+    }
+
+    bool    HttpParser::compareTwoStringsCaseInsensitive(std::string str, const std::string& expected) const {
+        for (std::size_t i = 0; i < str.size(); i++)
+            str[i] = std::toupper(static_cast<unsigned char>(str[i]));
+        return (str == expected);
     }
 
     bool    HttpParser::isValidHttpVersion(const std::string& version) {
@@ -400,6 +434,12 @@ namespace webserv
         std::size_t last = str.find_last_not_of(" \t");
 
         return str.substr(first, last - first + 1);
+    }
+
+    std::size_t HttpParser::calculateConsumed(std::size_t absolutePosistion) const {
+        if (absolutePosistion <= _impl->feedSize)
+            return 0;
+        return (std::min(absolutePosistion - _impl->dataPrevSize, _impl->feedSize));
     }
 
     const HttpRequest&  HttpParser::request() const {
