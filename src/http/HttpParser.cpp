@@ -1,6 +1,7 @@
 # include "../../includes/ModuleInterfaces.hpp"
 # include <iostream>
 # include <string>
+# include <ifstream>
 # include <algorithm>
 
 namespace webserv
@@ -15,7 +16,15 @@ namespace webserv
             COMPLETE,
         };
 
-        parseStage  stage;
+        enum chunkedBody
+        {
+            HEX_LINE,
+            DATA_LINE,
+            TRAILER_LINE,
+        };
+
+        parseStage  parseStage;
+        chunkedBody chunkedStage;
 
         HttpRequest httpRequest;
         ParseResult parseResult;
@@ -23,6 +32,7 @@ namespace webserv
         std::string data;
         std::size_t dataPrevSize;
         std::size_t feedSize;
+        std::size_t chunkedSize;
 
         std::string requestLine;
         std::string headerLine;
@@ -39,14 +49,19 @@ namespace webserv
         std::size_t lineEnd;
         std::size_t lineLength;
 
+        std::size_t bodySizeCount;
+
         bool    httpVersion;
+        bool    chunkedInitialized;
 
     };
 
     HttpParser::HttpParser(std::size_t maxBodyBytes) : _maxBodyBytes(maxBodyBytes), 
         _impl(new Impl()) {
-        _impl->stage = Impl::REQUEST_LINE;
+        _impl->parseStage = Impl::REQUEST_LINE;
+        _impl->chunkedStage = Impl::HEX_LINE;
         _impl->httpVersion = false;
+        _impl->chunkedInitialized = false;
         _impl->feedSize = 0;
         _impl->dataPrevSize = 0;
         _impl->headerStart = 0;
@@ -57,6 +72,8 @@ namespace webserv
         _impl->lineStart = 0;
         _impl->lineEnd = 0;
         _impl->lineLength = 0;
+        _impl->chunkedSize = 0;
+        _impl->bodySizeCount = 0;
     }
     
     HttpParser::~HttpParser() {
@@ -69,22 +86,22 @@ namespace webserv
 
         _impl->parseResult.consumed = 0;
         _impl->data.append(data, size);
-        if (_impl->stage == Impl::REQUEST_LINE)
+        if (_impl->parseStage == Impl::REQUEST_LINE)
         {
             if (!parseRequestLine())
                 return _impl->parseResult;
             _impl->parseResult.consumed = calculateConsumed(_impl->requestEnd + 2);
-            _impl->stage = Impl::HEADERS;
+            _impl->parseStage = Impl::HEADERS;
         }
 
-        if (_impl->stage == Impl::HEADERS)
+        if (_impl->parseStage == Impl::HEADERS)
         {
             if (!parseHeaders())
                 return _impl->parseResult;
             _impl->bodyStart;
         }
 
-        if (_impl->stage == Impl::BODY)
+        if (_impl->parseStage == Impl::BODY)
         {
 
         }
@@ -252,14 +269,110 @@ namespace webserv
     bool    HttpParser::parseBody() {
         HttpHeaders::const_iterator header;
 
-        if (countHeaderNameOccurrences(_impl->httpRequest.headers, "CONTENT-LENGTH") == 1)
+        if (countHeaderNameOccurrences(_impl->httpRequest.headers, "TRANSFER-ENCODING") == 1)
         {
-            header = findHeader(_impl->httpRequest.headers, "CONTENT-LENGTH");
+            if (!parseBodyTransferEncoding())
+                return false;
+        }
+        else if (countHeaderNameOccurrences(_impl->httpRequest.headers, "CONTENT-LENGTH"))
+        {
             
         }
-        else
+        _impl->parseStage = Impl::COMPLETE;
+        return true;
+    }
+
+    bool    HttpParser::parseBodyTransferEncoding() {
+        std::size_t dataEnd;
+        std::size_t extensionPos = 0;
+        std::string hex;
+
+        if (!_impl->chunkedInitialized)
         {
-            header = findHeader(_impl->httpRequest.headers, "TRANSFER-ENCODING");
+            _impl->lineStart = _impl->bodyStart;
+            _impl->chunkedInitialized = true;
+        }
+        while (true)
+        {
+            if (_impl->chunkedStage == Impl::HEX_LINE)
+            {
+                _impl->lineEnd = _impl->data.find("\r\n", _impl->lineStart);
+                if (_impl->lineEnd == std::string::npos)
+                {
+                    _impl->parseResult.consumed = _impl->feedSize;
+                    return (fillParseResult(PARSE_NEED_MORE, 0, NULL, false));
+                }
+                hex = _impl->data.substr(_impl->lineStart, _impl->lineEnd - _impl->lineStart);
+                extensionPos = hex.find(';');
+                if (extensionPos != std::string::npos)
+                    hex = hex.substr(0, extensionPos);
+
+                if (hex.empty())
+                    return (fillParseResult(PARSE_ERROR, 400, NULL, false));
+
+                for (std::size_t i = 0; i < hex.size(); i++)
+                {
+                    if (!std::isxdigit(static_cast<unsigned char>(hex[i])))
+                        return (fillParseResult(PARSE_ERROR, 400, NULL, false));
+                }
+
+                std::stringstream ss(hex);
+                ss >> std::hex >> _impl->chunkedSize;
+                if (ss.fail() || !ss.eof())
+                    return (fillParseResult(PARSE_ERROR, 400, NULL, false));
+
+                if (_impl->chunkedSize > _maxBodyBytes - _impl->bodySizeCount)
+                    return (fillParseResult(PARSE_ERROR, 413, NULL, false));
+            
+                _impl->bodySizeCount += _impl->chunkedSize;
+                _impl->lineStart = _impl->lineEnd + 2;
+                if (_impl->chunkedSize == 0)
+                {
+                    _impl->chunkedStage = Impl::TRAILER_LINE;
+                    continue ;
+                }
+                _impl->chunkedStage = Impl::DATA_LINE;
+            }
+
+            if (_impl->bodySizeCount > _maxBodyBytes)
+                return (fillParseResult(PARSE_ERROR, 413, NULL, false));
+
+            if (_impl->chunkedStage == Impl::TRAILER_LINE)
+            {
+                _impl->lineEnd = _impl->data.find("\r\n", _impl->lineStart);
+                if (_impl->lineEnd == std::string::npos)
+                {
+                    _impl->parseResult.consumed = _impl->feedSize;
+                    return (fillParseResult(PARSE_NEED_MORE, 0, NULL, false));
+                }
+
+                if (_impl->lineEnd == _impl->lineStart)
+                {
+                    _impl->lineStart += 2;
+                    _impl->chunkedInitialized = false;
+                    _impl->chunkedStage = Impl::HEX_LINE;
+                    _impl->parseResult.consumed = calculateConsumed(_impl->lineStart);
+                    return true;
+                }
+                _impl->lineStart = _impl->lineEnd + 2;
+            }
+
+            if (_impl->chunkedStage == Impl::DATA_LINE)
+            {
+                if (_impl->data.size() - _impl->lineStart < _impl->chunkedSize + 2)
+                {
+                    _impl->parseResult.consumed = _impl->feedSize;
+                    return (fillParseResult(PARSE_NEED_MORE, 0, NULL, false));
+                }
+                _impl->httpRequest.body.append(_impl->data, _impl->lineStart, _impl->chunkedSize);
+
+                dataEnd = _impl->lineStart + _impl->chunkedSize;
+                if (_impl->data[dataEnd] != '\r' || _impl->data[dataEnd + 1] != '\n')
+                    return (fillParseResult(PARSE_ERROR, 400, NULL, false));
+
+                _impl->lineStart += _impl->chunkedSize + 2;
+                _impl->chunkedStage = Impl::HEX_LINE;
+            }
         }
     }
 

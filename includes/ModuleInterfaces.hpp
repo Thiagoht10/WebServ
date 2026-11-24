@@ -104,6 +104,8 @@ namespace webserv
         bool    parseRequestLine();
         bool    parseHeaders();
         bool    parseBody();
+        bool    parseBodyContentLength();
+        bool    parseBodyTransferEncoding();
 
         bool    validateHeaders(HttpHeaders&    headers);
         bool    isHeaderName(std::string name, const std::string&   expected) const; // Encontra um header no vector de headers, name: nome do header, expected: nome do header que queremos encontrar
