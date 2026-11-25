@@ -1,4 +1,5 @@
 # include "../../includes/ModuleInterfaces.hpp"
+# include "../../includes/http/HttpParser.hpp"
 # include <iostream>
 # include <string>
 # include <sstream>
@@ -33,6 +34,7 @@ namespace webserv
         std::size_t dataPrevSize;
         std::size_t feedSize;
         std::size_t chunkedSize;
+        std::size_t headersSize;
 
         std::string requestLine;
         std::string headerLine;
@@ -66,6 +68,7 @@ namespace webserv
         _impl->dataPrevSize = 0;
         _impl->headerStart = 0;
         _impl->headerEnd = 0;
+        _impl->headersSize = 0;
         _impl->bodyStart = 0;
         _impl->requestStart = 0;
         _impl->requestEnd = 0;
@@ -98,15 +101,16 @@ namespace webserv
         {
             if (!parseHeaders())
                 return _impl->parseResult;
-            _impl->bodyStart;
+            _impl->parseStage = Impl::BODY;
         }
 
         if (_impl->parseStage == Impl::BODY)
         {
-
+            if (!parseBody())
+                return _impl->parseResult;
         }
-
-
+        _impl->parseResult.httpStatus = PARSE_COMPLETE;
+        return _impl->parseResult;
     }
 
     bool    HttpParser::parseRequestLine() {
@@ -114,9 +118,15 @@ namespace webserv
         _impl->requestEnd = _impl->data.find("\r\n", _impl->requestStart);
         if (_impl->requestEnd == std::string::npos)
         {
+            if (_impl->data.size() - _impl->requestStart > REQUEST_LINE_SIZE_LIMIT)
+                return (fillParseResult(PARSE_ERROR, 414, NULL, false));
+
             _impl->parseResult.consumed = _impl->feedSize;
             return (fillParseResult(PARSE_NEED_MORE, 0, NULL, false));
         }
+        if (_impl->requestEnd - _impl->requestStart > REQUEST_LINE_SIZE_LIMIT)
+            return (fillParseResult(PARSE_ERROR, 414, NULL, false));
+
         _impl->requestLine = _impl->data.substr(_impl->requestStart , _impl->requestEnd - _impl->requestStart);
         if (_impl->requestLine.find('\t') != std::string::npos)
             return (fillParseResult(PARSE_ERROR, 400, NULL, false));
@@ -152,6 +162,7 @@ namespace webserv
 
         if (!isValidHttpVersion(_impl->httpRequest.version))
             return false;
+
         return true;
     }
 
@@ -161,6 +172,9 @@ namespace webserv
         _impl->headerEnd = _impl->data.find("\r\n\r\n");
         if (_impl->headerEnd == std::string::npos)
         {
+            if (_impl->data.size() - _impl->headerStart > TOTAL_HEADERS_SIZE_LIMIT)
+                return (fillParseResult(PARSE_ERROR, 431, NULL, false));
+
             _impl->parseResult.consumed = _impl->feedSize;
             return (fillParseResult(PARSE_NEED_MORE, 0, NULL, false));
         }
@@ -177,6 +191,10 @@ namespace webserv
             _impl->lineLength = _impl->lineEnd - _impl->lineStart;
             _impl->headerLine = _impl->data.substr(_impl->lineStart, _impl->lineLength);
 
+            _impl->headersSize += _impl->headerLine.size();
+             if (_impl->headerLine.size() > HEADER_LINE_SIZE_LIMIT || _impl->headersSize > HEADER_LINE_SIZE_LIMIT)
+                return (fillParseResult(PARSE_ERROR, 431, NULL, false));
+
             // divide o header em name e value
             _impl->headerSeparator = _impl->headerLine.find(':');
             if (_impl->headerSeparator == std::string::npos || _impl->headerSeparator == 0)
@@ -189,6 +207,9 @@ namespace webserv
             _impl->lineStart = _impl->lineEnd + 2;
             _impl->headerStart = _impl->lineEnd + 2;
         }
+        if (_impl->headersSize > HEADER_LINE_SIZE_LIMIT)
+            return (fillParseResult(PARSE_ERROR, 431, NULL, false));
+
         if (!validateHeaders(_impl->httpRequest.headers))
             return false;
         return true;
@@ -200,6 +221,9 @@ namespace webserv
         std::size_t first;
         std::size_t last;
 
+
+        if (headers.size() > NUMBER_OF_HEADERS_LIMIT)
+            return (fillParseResult(PARSE_ERROR, 431, NULL, false));
         for (it = headers.begin(); it != headers.end(); ++it)
         {
             if (it->name.empty() || isOnlyWhiteSpaces(it->name))
@@ -276,7 +300,8 @@ namespace webserv
         }
         else if (countHeaderNameOccurrences(_impl->httpRequest.headers, "CONTENT-LENGTH"))
         {
-            
+            if (!parseBodyContentLength())
+                return false;
         }
         _impl->parseStage = Impl::COMPLETE;
         return true;
@@ -374,6 +399,30 @@ namespace webserv
                 _impl->chunkedStage = Impl::HEX_LINE;
             }
         }
+    }
+
+    bool    HttpParser::parseBodyContentLength() {
+        std::string body;
+        HttpHeaders::const_iterator header;
+        std::size_t contentLength;
+
+        header = findHeader(_impl->httpRequest.headers, "CONTENT-LENGTH");
+        contentLength = static_cast<std::size_t>(header->value.c_str(), NULL, 10);
+        if (errno == ERANGE)
+            return (fillParseResult(PARSE_ERROR, 413, NULL, false));
+
+        if (contentLength >_maxBodyBytes)
+            return (fillParseResult(PARSE_ERROR, 413, NULL, false));
+
+        body = _impl->data.substr(_impl->bodyStart);
+        if (body.size() < contentLength)
+        {
+            _impl->parseResult.consumed = _impl->feedSize;
+            return (fillParseResult(PARSE_NEED_MORE, 0, NULL, false));
+        }
+        _impl->httpRequest.body = _impl->data.substr(_impl->bodyStart, contentLength);
+        _impl->parseResult.consumed = calculateConsumed(_impl->bodyStart + contentLength);
+        return true;
     }
 
     bool    HttpParser::compareTwoStringsCaseInsensitive(std::string str, const std::string& expected) const {
